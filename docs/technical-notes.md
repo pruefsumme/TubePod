@@ -18,7 +18,7 @@ The build uses Theos, the official Apple iOS 6.1 SDK from Xcode 4.6.3, and Apple
 
 ## How the feature is attached
 
-`Tweak.xm` hooks `UIActionSheet showInView:` inside YouTube. It adds **Save Audio** to the action sheet used by the video action controller. The visible action button is the share-style arrow over the video.
+`Sources/Tweak.xm` hooks `UIActionSheet showInView:` inside YouTube. It adds **Save Audio** to the action sheet used by the video action controller. The visible action button is the share-style arrow over the video.
 
 Do not add the button to every action sheet. Check the delegate and make sure the current object exposes a usable video ID and stream first. Forward all normal button actions to YouTube's original delegate.
 
@@ -26,7 +26,7 @@ YouTube 1.4.0 normally exposes old `YTStream` objects. These often contain a URL
 
 ## Download and conversion path
 
-`TPDownloader.m` owns the download in the YouTube process.
+`Sources/TPDownloader.m` owns the download in the YouTube process.
 
 Files live in YouTube's `Documents/TubePod` directory. A running download uses `<video ID>.part`. HTTP range requests allow a partial download to resume. If the server ignores the range and sends a complete response, the old partial file is truncated first.
 
@@ -93,7 +93,7 @@ The problem is the Music database record. StoreServices fills the visible durati
 
 This creates a track that can show a normal length while playing no sound or ending immediately. One bad entry can also upset Music's playback queue and make good songs stop playing until the bad entry is removed.
 
-After StoreServices finishes, `TPImporter.m` finds the new completed track and reads its copied file with AVFoundation. It then sets:
+After StoreServices finishes, `Sources/TPImporter.m` finds the new completed track and reads its copied file with AVFoundation. It then sets:
 
 - `ML3TrackPropertySampleRate`
 - `ML3TrackPropertyDurationInSamples`
@@ -132,11 +132,11 @@ Old completed tracks with a real file location can usually be repaired. Read the
 
 ## Source layout
 
-- `Tweak.xm` is the YouTube integration/UI area: it finds video metadata, adds the action-sheet button, and owns user-facing alerts and session routing.
-- `TPDownloader.m` is the download pipeline: it downloads, resumes, validates, converts, and preserves files on failure.
-- `TPBridge.h/.m` is the shared bridge protocol: typed command/status messages, ownership, validation, serialization, tokens, and size limits.
-- `TPImporter.m` is the Music import pipeline: staging, transaction orchestration, cancellation, repair, cleanup, and the atomic retry ledger.
-- `TPPrivate.h/.m` and `TPDatabase.h/.m` are the private API/database helper area: checked StoreServices, MusicLibrary, MediaPlayer calls, and read-only SQLite queries.
+- `Sources/Tweak.xm` is the YouTube integration/UI area: it finds video metadata, adds the action-sheet button, and owns user-facing alerts and session routing.
+- `Sources/TPDownloader.h/.m` is the download pipeline: it downloads, resumes, validates, converts, and preserves files on failure.
+- `Sources/TPBridge.h/.m` is the shared bridge protocol: typed command/status messages, ownership, validation, serialization, tokens, and size limits.
+- `Sources/TPImporter.h/.m` is the Music import pipeline: staging, transaction orchestration, cancellation, repair, cleanup, and the atomic retry ledger.
+- `Sources/TPPrivateAPI.h/.m` and `Sources/TPMusicDatabase.h/.m` contain checked StoreServices, MusicLibrary, MediaPlayer calls, and read-only SQLite queries.
 - The loopback server experiment is deliberately excluded from the repository. Its failure is documented above so it is not accidentally rebuilt.
 - `TubePod.plist` limits MobileSubstrate injection to YouTube and Music.
 

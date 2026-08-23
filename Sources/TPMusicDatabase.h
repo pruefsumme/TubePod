@@ -1,8 +1,8 @@
 #import <Foundation/Foundation.h>
 
-extern NSString * const TPDatabaseErrorDomain;
+extern NSString * const TPMusicDatabaseErrorDomain;
 
-@interface TPDatabase : NSObject
+@interface TPMusicDatabase : NSObject
 + (NSSet *)allTrackIDsForTitle:(NSString *)title album:(NSString *)album error:(NSError **)error;
 + (NSSet *)completedTrackIDsForTitle:(NSString *)title album:(NSString *)album error:(NSError **)error;
 + (NSSet *)emptyPlaceholderTrackIDsForTitle:(NSString *)title album:(NSString *)album error:(NSError **)error;

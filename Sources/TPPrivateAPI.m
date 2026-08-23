@@ -1,4 +1,4 @@
-#import "TPPrivate.h"
+#import "TPPrivateAPI.h"
 #import <objc/message.h>
 #import <objc/runtime.h>
 #import <dlfcn.h>

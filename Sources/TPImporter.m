@@ -1,7 +1,7 @@
 #import "TPImporter.h"
 #import "TPBridge.h"
-#import "TPDatabase.h"
-#import "TPPrivate.h"
+#import "TPMusicDatabase.h"
+#import "TPPrivateAPI.h"
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <CoreMedia/CoreMedia.h>
@@ -85,7 +85,7 @@ static NSDictionary *TPLedgerEntry(NSString *videoID) {
 - (BOOL)verifyLedgerSuccess:(NSDictionary *)entry error:(NSError **)error {
     NSNumber *persistentID = entry[@"musicPersistentID"];
     if (![persistentID isKindOfClass:[NSNumber class]]) return NO;
-    NSDictionary *record = [TPDatabase recordForPersistentID:persistentID error:error];
+    NSDictionary *record = [TPMusicDatabase recordForPersistentID:persistentID error:error];
     if (!record) return NO;
     if (![record[@"album"] isEqualToString:TPMusicAlbum] || ![record[@"title"] length] || ![record[@"location"] length] || [record[@"downloading"] boolValue]) return NO;
     NSError *privateError = nil;
@@ -298,7 +298,7 @@ static NSDictionary *TPLedgerEntry(NSString *videoID) {
 - (void)cleanupStaleTubePodPlaceholders {
     if (_activeMusicToken.length) return;
     NSError *error = nil;
-    NSSet *ids = [TPDatabase allEmptyPlaceholderTrackIDsForAlbum:TPMusicAlbum error:&error];
+    NSSet *ids = [TPMusicDatabase allEmptyPlaceholderTrackIDsForAlbum:TPMusicAlbum error:&error];
     if (ids && ids.count) [self deleteTrackIDs:ids notify:YES error:NULL];
 }
 
@@ -354,7 +354,7 @@ static NSDictionary *TPLedgerEntry(NSString *videoID) {
         NSString *album = oldMetadata ? [TPPrivateAPI storeCollectionNameForMetadata:oldMetadata error:&error] : nil;
         if ([album isEqualToString:TPMusicAlbum] && ![TPPrivateAPI cancelStoreDownload:oldDownload fromQueue:queue error:&error]) { completion(NO, error ?: [self error:31 message:@"Music could not cancel an older TubePod StoreServices job."]); return; }
     }
-    NSSet *preexisting = [TPDatabase allTrackIDsForTitle:metadata[@"title"] album:TPMusicAlbum error:&error];
+    NSSet *preexisting = [TPMusicDatabase allTrackIDsForTitle:metadata[@"title"] album:TPMusicAlbum error:&error];
     if (!preexisting) { completion(NO, error); return; }
     self.importTitle = metadata[@"title"];
     self.preexistingTrackIDs = preexisting;
@@ -388,7 +388,7 @@ static NSDictionary *TPLedgerEntry(NSString *videoID) {
     [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(repairImportedTrack) object:nil];
     if (!_completion || !_importTitle) return;
     NSError *error = nil;
-    NSMutableSet *candidates = [[TPDatabase completedTrackIDsForTitle:_importTitle album:TPMusicAlbum error:&error] mutableCopy] ?: [NSMutableSet set];
+    NSMutableSet *candidates = [[TPMusicDatabase completedTrackIDsForTitle:_importTitle album:TPMusicAlbum error:&error] mutableCopy] ?: [NSMutableSet set];
     if (error) { [self finishStoreImport:NO error:error]; return; }
     [candidates minusSet:_preexistingTrackIDs ?: [NSSet set]];
     NSNumber *persistentID = candidates.anyObject;
@@ -421,7 +421,7 @@ static NSDictionary *TPLedgerEntry(NSString *videoID) {
     [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(pollPostImportCleanup) object:nil];
     if (!_completion || !_importTitle.length) return;
     NSError *error = nil;
-    NSMutableSet *emptyTrackIDs = [[TPDatabase emptyPlaceholderTrackIDsForTitle:_importTitle album:TPMusicAlbum error:&error] mutableCopy] ?: [NSMutableSet set];
+    NSMutableSet *emptyTrackIDs = [[TPMusicDatabase emptyPlaceholderTrackIDsForTitle:_importTitle album:TPMusicAlbum error:&error] mutableCopy] ?: [NSMutableSet set];
     if (error) { [self finishStoreImport:NO error:error]; return; }
     [emptyTrackIDs minusSet:_preexistingTrackIDs ?: [NSSet set]];
     if (emptyTrackIDs.count) { if (![self deleteTrackIDs:emptyTrackIDs notify:YES error:&error]) { [self finishStoreImport:NO error:error]; return; } self.cleanupQuietPolls = 0; } else self.cleanupQuietPolls++;
@@ -438,7 +438,7 @@ static NSDictionary *TPLedgerEntry(NSString *videoID) {
     if (_queue) [TPPrivateAPI removeStoreObserver:self fromQueue:_queue error:NULL];
     if (!success && _importTitle.length) {
         NSError *cleanupError = nil;
-        NSSet *emptyTrackIDs = [TPDatabase emptyPlaceholderTrackIDsForTitle:_importTitle album:TPMusicAlbum error:&cleanupError];
+        NSSet *emptyTrackIDs = [TPMusicDatabase emptyPlaceholderTrackIDsForTitle:_importTitle album:TPMusicAlbum error:&cleanupError];
         NSMutableSet *newIDs = [emptyTrackIDs mutableCopy]; [newIDs minusSet:_preexistingTrackIDs ?: [NSSet set]];
         if (newIDs && ![self deleteTrackIDs:newIDs notify:YES error:&cleanupError] && !error) error = cleanupError;
     }
