@@ -1,0 +1,6 @@
+#!/bin/sh
+
+killall YouTube 2>/dev/null || true
+killall 'Music~iphone' 2>/dev/null || true
+
+exit 0

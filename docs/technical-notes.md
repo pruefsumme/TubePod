@@ -18,7 +18,11 @@ The build uses Theos, the official Apple iOS 6.1 SDK from Xcode 4.6.3, and Apple
 
 ## How the feature is attached
 
-`Sources/Tweak.xm` hooks `UIActionSheet showInView:` inside YouTube. It adds **Save Audio** to the action sheet used by the video action controller. The visible action button is the share-style arrow over the video.
+`Sources/Tweak.xm` adds a fourth button to YouTube's `YTVideoActionBarView`. It sits beside Like, Dislike, and Share and starts the same save workflow directly. The white download symbol is drawn with Core Graphics, so no extra image file is needed.
+
+The action bar stores its three original controls in the private `_buttons` array. It does not expose separate `likeButton`, `dislikeButton`, or `actionButton` properties. Read the array defensively, require three real `UIButton` objects, and then space all four buttons evenly. TubePod finds the live action-bar class when the view joins a window, hooks its layout method, and keeps YouTube's normal button behavior unchanged.
+
+TubePod also hooks `UIActionSheet showInView:` and adds **Save Audio** to the action sheet used by the video action controller. Keep this as a fallback if the direct button cannot be attached.
 
 Do not add the button to every action sheet. Check the delegate and make sure the current object exposes a usable video ID and stream first. Forward all normal button actions to YouTube's original delegate.
 
@@ -142,7 +146,7 @@ Old completed tracks with a real file location can usually be repaired. Read the
 
 ## Source layout
 
-- `Sources/Tweak.xm` is the YouTube integration/UI area: it finds video metadata, adds the action-sheet button, and owns user-facing alerts and session routing.
+- `Sources/Tweak.xm` is the YouTube integration/UI area: it finds video metadata, adds the direct download button and action-sheet fallback, and owns user-facing alerts and session routing.
 - `Sources/TPDownloader.h/.m` is the download pipeline: it downloads, resumes, validates, converts, and preserves files on failure.
 - `Sources/TPBridge.h/.m` is the shared bridge protocol: typed command/status messages, ownership, validation, serialization, tokens, and size limits.
 - `Sources/TPImporter.h/.m` is the Music import pipeline: staging, transaction orchestration, cancellation, repair, cleanup, and the atomic retry ledger.
@@ -162,7 +166,7 @@ make clean package FINALPACKAGE=1
 
 Check the resulting dylib for `LC_VERSION_MIN_IPHONEOS 6.0` before installing it. Install the rootful package with `dpkg -i`, then restart both YouTube and `Music~iphone`.
 
-Version `0.0.1` was the first beta release and the first build confirmed to complete the full download, handoff, StoreServices import, metadata repair, and playback cycle. `0.0.2~beta2` added delayed placeholder cleanup and refreshed MediaPlayer's current library cache. The prepared hardening package is `0.0.3~beta1`, adding session routing, the owned three-channel bridge, checked runtime signatures, album-constrained queries, the 24 MiB limit, and persistent retry idempotency. Device acceptance still requires the complete regression below. Alpha9 added the post-import MusicLibrary repair. Alpha10 added clear download/import phases, background time, and placeholder cleanup. Alpha11 added StoreServices queue cancellation and local handoff logging. Alpha12 proved that the live loopback handoff was unreliable. Alpha13 introduced the working named-pasteboard handoff. Alpha8's direct MusicLibrary importer experiment must not be restored.
+Version `0.0.1` was the first beta release and the first build confirmed to complete the full download, handoff, StoreServices import, metadata repair, and playback cycle. `0.0.2~beta2` added delayed placeholder cleanup and refreshed MediaPlayer's current library cache. `0.0.3~beta1` added session routing, the owned three-channel bridge, checked runtime signatures, album-constrained queries, the 24 MiB limit, and persistent retry idempotency. `0.0.4~beta2` adds the direct video-control download button and the local legacy Cydia package icon. Device acceptance still requires the complete regression below. Alpha9 added the post-import MusicLibrary repair. Alpha10 added clear download/import phases, background time, and placeholder cleanup. Alpha11 added StoreServices queue cancellation and local handoff logging. Alpha12 proved that the live loopback handoff was unreliable. Alpha13 introduced the working named-pasteboard handoff. Alpha8's direct MusicLibrary importer experiment must not be restored.
 
 The first `0.0.3~beta1` device regression completed on 2026-08-23. A fresh download of “Revenge” imported as one completed record with a purchase-file location, 44,100 Hz sample rate, 11,665,408 audio samples, and 128 kbps bitrate. The TubePod placeholder count was zero. Playback from the start, seeking, and playing another known-good song afterward all worked.
 
@@ -171,7 +175,7 @@ The first `0.0.3~beta1` device regression completed on 2026-08-23. A fresh downl
 A build is not proven by a successful compilation, a StoreServices acceptance result, or a title appearing in Music. Test this whole sequence on the iPod:
 
 1. Start with a song that is not already in Music.
-2. Use **Save Audio** and confirm that the percentage changes to **Adding to Music**.
+2. Use the direct download button and confirm that the percentage changes to **Adding to Music**. Repeat through **Save Audio** in the Share menu when checking the fallback.
 3. Stay in Music until TubePod shows its final Saved message.
 4. Confirm that exactly one completed song exists and no empty duplicate remains.
 5. Play from the start and seek into the middle.

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.0.4-beta2 - 2026-08-23
+
+- Adds a download button beside Like, Dislike, and Share in YouTube's video controls.
+- Keeps **Save Audio** in the Share menu as a fallback.
+- Bundles the TubePod icon so it appears in legacy Cydia after installation.
+
+## 0.0.4-beta1 - 2026-08-23
+
 - Downloads the YouTube thumbnail and crops it to a square 600 px cover.
 - Embeds the cover into the M4A without re-encoding its AAC audio.
 - Registers the embedded JPEG in Music's artwork cache after StoreServices creates the track.

@@ -7,8 +7,13 @@
 #import "TPBridge.h"
 
 static char TPProxyKey;
+static char TPDownloadButtonKey;
+static char TPDownloadButtonTargetKey;
 static void (*TPOriginalShow)(UIActionSheet *, SEL, UIView *);
+static void (*TPOriginalActionBarLayout)(UIView *, SEL);
+static void (*TPOriginalViewDidMoveToWindow)(UIView *, SEL);
 static NSMutableSet *TPActiveProxies;
+static BOOL TPActionBarHooksInstalled;
 
 static id TPSafeValue(id object, NSString *key) {
     if (!object || !key.length) return nil;
@@ -81,6 +86,7 @@ static NSDictionary *TPVideoInfo(id source) {
     if ([_originalDelegate respondsToSelector:_cmd]) [_originalDelegate actionSheet:sheet didDismissWithButtonIndex:index];
 }
 - (void)beginSave {
+    [TPActiveProxies addObject:self];
     self.allowDuplicate = NO;
     NSDictionary *state = [NSDictionary dictionaryWithContentsOfFile:[TPBaseDirectory() stringByAppendingPathComponent:@"state.plist"]];
     if ([state[_info[@"videoID"]][@"status"] isEqualToString:@"imported"]) { UIAlertView *again = [[UIAlertView alloc] initWithTitle:@"Already Saved" message:@"This video was previously imported." delegate:self cancelButtonTitle:@"Cancel" otherButtonTitles:@"Download Again", nil]; again.tag = 100; [again show]; return; }
@@ -106,7 +112,7 @@ static NSDictionary *TPVideoInfo(id source) {
         [[[UIAlertView alloc] initWithTitle:@"TubePod" message:error.localizedDescription delegate:nil cancelButtonTitle:@"OK" otherButtonTitles:nil] show];
     }
 }
-- (void)alertView:(UIAlertView *)alert clickedButtonAtIndex:(NSInteger)index { if (alert.tag == 100) { if (index == 1) { self.allowDuplicate = YES; [self startDownload]; } return; } if (alert == _progressAlert && self.downloadSession) [[TPDownloader sharedDownloader] cancelSession:self.downloadSession]; }
+- (void)alertView:(UIAlertView *)alert clickedButtonAtIndex:(NSInteger)index { if (alert.tag == 100) { if (index == 1) { self.allowDuplicate = YES; [self startDownload]; } else [TPActiveProxies removeObject:self]; return; } if (alert == _progressAlert && self.downloadSession) [[TPDownloader sharedDownloader] cancelSession:self.downloadSession]; }
 - (void)downloadProgressForSession:(TPDownloadSession *)session fraction:(double)fraction phase:(NSString *)phase {
     if (self.downloadSession != session) return;
     if ([phase isEqualToString:@"artwork"]) {
@@ -127,6 +133,106 @@ static NSDictionary *TPVideoInfo(id source) {
 - (void)forwardInvocation:(NSInvocation *)invocation { if ([_originalDelegate respondsToSelector:invocation.selector]) [invocation invokeWithTarget:_originalDelegate]; else [super forwardInvocation:invocation]; }
 @end
 
+@interface TPDownloadButtonTarget : NSObject
+@property(nonatomic, weak) UIView *actionBar;
+- (void)downloadButtonPressed:(UIButton *)button;
+@end
+
+@implementation TPDownloadButtonTarget
+- (void)downloadButtonPressed:(UIButton *)button {
+    (void)button;
+    id delegate = TPFirstValue(_actionBar, @[@"videoActionsViewDelegate"]);
+    NSDictionary *info = TPVideoInfo(delegate);
+    if (!info) {
+        [[[UIAlertView alloc] initWithTitle:@"TubePod" message:@"This video is not ready to download yet." delegate:nil cancelButtonTitle:@"OK" otherButtonTitles:nil] show];
+        return;
+    }
+    TPActionProxy *proxy = [TPActionProxy new];
+    proxy.info = info;
+    [proxy beginSave];
+}
+@end
+
+static UIImage *TPDownloadButtonImage(void) {
+    static UIImage *image;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        CGSize size = CGSizeMake(36.0, 36.0);
+        UIGraphicsBeginImageContextWithOptions(size, NO, 0.0);
+        CGContextRef context = UIGraphicsGetCurrentContext();
+        CGContextSetFillColorWithColor(context, [UIColor whiteColor].CGColor);
+        CGContextBeginPath(context);
+        CGContextMoveToPoint(context, 15.0, 5.0);
+        CGContextAddLineToPoint(context, 21.0, 5.0);
+        CGContextAddLineToPoint(context, 21.0, 19.0);
+        CGContextAddLineToPoint(context, 27.0, 19.0);
+        CGContextAddLineToPoint(context, 18.0, 28.0);
+        CGContextAddLineToPoint(context, 9.0, 19.0);
+        CGContextAddLineToPoint(context, 15.0, 19.0);
+        CGContextClosePath(context);
+        CGContextFillPath(context);
+        CGContextSetStrokeColorWithColor(context, [UIColor whiteColor].CGColor);
+        CGContextSetLineWidth(context, 2.5);
+        CGContextSetLineCap(context, kCGLineCapRound);
+        CGContextMoveToPoint(context, 8.0, 31.0);
+        CGContextAddLineToPoint(context, 28.0, 31.0);
+        CGContextStrokePath(context);
+        image = UIGraphicsGetImageFromCurrentImageContext();
+        UIGraphicsEndImageContext();
+    });
+    return image;
+}
+
+static UIButton *TPDownloadButtonForActionBar(UIView *actionBar) {
+    UIButton *button = objc_getAssociatedObject(actionBar, &TPDownloadButtonKey);
+    if (button) return button;
+    button = [UIButton buttonWithType:UIButtonTypeCustom];
+    [button setImage:TPDownloadButtonImage() forState:UIControlStateNormal];
+    button.showsTouchWhenHighlighted = YES;
+    button.accessibilityLabel = @"Save Audio";
+    TPDownloadButtonTarget *target = [TPDownloadButtonTarget new];
+    target.actionBar = actionBar;
+    [button addTarget:target action:@selector(downloadButtonPressed:) forControlEvents:UIControlEventTouchUpInside];
+    [actionBar addSubview:button];
+    objc_setAssociatedObject(actionBar, &TPDownloadButtonKey, button, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(actionBar, &TPDownloadButtonTargetKey, target, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    return button;
+}
+
+static void TPArrangeActionBar(UIView *actionBar) {
+    NSArray *originalButtons = TPFirstValue(actionBar, @[@"buttons", @"_buttons"]);
+    UIButton *like = originalButtons.count > 0 ? originalButtons[0] : nil;
+    UIButton *dislike = originalButtons.count > 1 ? originalButtons[1] : nil;
+    UIButton *share = originalButtons.count > 2 ? originalButtons[2] : nil;
+    if (![like isKindOfClass:[UIButton class]] || ![dislike isKindOfClass:[UIButton class]] || ![share isKindOfClass:[UIButton class]]) return;
+    UIButton *download = TPDownloadButtonForActionBar(actionBar);
+    NSArray *buttons = @[like, dislike, share, download];
+    CGFloat spacing = CGRectGetWidth(actionBar.bounds) / buttons.count;
+    CGFloat centerY = share.center.y;
+    download.bounds = share.bounds;
+    for (NSUInteger index = 0; index < buttons.count; index++) {
+        UIButton *item = buttons[index];
+        item.center = CGPointMake(spacing * (index + 0.5), centerY);
+    }
+    download.hidden = share.hidden;
+    download.alpha = share.alpha;
+}
+
+static void TPActionBarLayout(UIView *actionBar, SEL cmd) {
+    TPOriginalActionBarLayout(actionBar, cmd);
+    TPArrangeActionBar(actionBar);
+}
+
+static void TPViewDidMoveToWindow(UIView *view, SEL cmd) {
+    TPOriginalViewDidMoveToWindow(view, cmd);
+    if (![NSStringFromClass([view class]) isEqualToString:@"YTVideoActionBarView"] || !view.window) return;
+    if (!TPActionBarHooksInstalled) {
+        TPActionBarHooksInstalled = YES;
+        MSHookMessageEx([view class], @selector(layoutSubviews), (IMP)TPActionBarLayout, (IMP *)&TPOriginalActionBarLayout);
+    }
+    dispatch_async(dispatch_get_main_queue(), ^{ TPArrangeActionBar(view); });
+}
+
 static void TPShowActionSheet(UIActionSheet *sheet, SEL cmd, UIView *view) {
     NSString *delegateName = NSStringFromClass([sheet.delegate class]);
     BOOL videoController = [delegateName rangeOfString:@"Video" options:NSCaseInsensitiveSearch].location != NSNotFound || [delegateName rangeOfString:@"Watch" options:NSCaseInsensitiveSearch].location != NSNotFound;
@@ -144,5 +250,6 @@ static void TPShowActionSheet(UIActionSheet *sheet, SEL cmd, UIView *view) {
         if ([[bundle bundleIdentifier] isEqualToString:@"com.apple.mobileipod"]) { [[TPImporter sharedImporter] startMusicBridgeListener]; return; }
         if (![[bundle bundleIdentifier] isEqualToString:@"com.google.ios.youtube"] || ![[bundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"] isEqualToString:@"1.4.0"]) return;
         MSHookMessageEx([UIActionSheet class], @selector(showInView:), (IMP)TPShowActionSheet, (IMP *)&TPOriginalShow);
+        MSHookMessageEx([UIView class], @selector(didMoveToWindow), (IMP)TPViewDidMoveToWindow, (IMP *)&TPOriginalViewDidMoveToWindow);
     }
 }
