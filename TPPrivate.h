@@ -7,40 +7,33 @@
 - (void)downloadQueue:(id)queue downloadStatusChangedAtIndex:(NSInteger)index;
 @end
 
-@interface SSDownloadMetadata : NSObject
-- (id)initWithDictionary:(NSDictionary *)dictionary;
-- (id)initWithKind:(NSString *)kind;
-- (void)setTitle:(NSString *)title;
-- (void)setArtistName:(NSString *)artist;
-- (void)setCollectionName:(NSString *)album;
-- (NSString *)collectionName;
-- (void)setKind:(NSString *)kind;
-- (void)setDuration:(NSNumber *)duration;
-- (void)setDurationInMilliseconds:(NSNumber *)duration;
-- (void)setFileExtension:(NSString *)extension;
-- (void)setPrimaryAssetURL:(NSURL *)url;
-- (void)setThumbnailImageURL:(NSURL *)url;
-@end
+/*
+ * All private-framework calls live behind this checked facade.  The concrete
+ * classes are intentionally still opaque to the importer; this keeps one
+ * objc_msgSend cast next to each runtime signature check.
+ */
+@interface TPPrivateAPI : NSObject
++ (BOOL)prepareStoreServices:(NSError **)error;
++ (id)newStoreMetadataWithTitle:(NSString *)title artist:(NSString *)artist durationMilliseconds:(NSNumber *)duration fileURL:(NSURL *)fileURL error:(NSError **)error;
++ (id)newStoreDownloadWithMetadata:(id)metadata error:(NSError **)error;
++ (id)newStoreQueue:(NSError **)error;
++ (BOOL)setStoreQueueAutomaticFinish:(id)queue error:(NSError **)error;
++ (BOOL)addStoreObserver:(id)observer toQueue:(id)queue error:(NSError **)error;
++ (BOOL)removeStoreObserver:(id)observer fromQueue:(id)queue error:(NSError **)error;
++ (BOOL)addStoreDownload:(id)download toQueue:(id)queue error:(NSError **)error;
++ (BOOL)cancelStoreDownload:(id)download fromQueue:(id)queue error:(NSError **)error;
++ (NSArray *)storeDownloads:(id)queue error:(NSError **)error;
++ (NSError *)storeFailureError:(id)download error:(NSError **)error;
++ (id)storeMetadataForDownload:(id)download error:(NSError **)error;
++ (NSString *)storeCollectionNameForMetadata:(id)metadata error:(NSError **)error;
 
-@interface SSDownload : NSObject
-- (id)initWithURL:(NSURL *)url;
-- (id)initWithDownloadMetadata:(SSDownloadMetadata *)metadata;
-- (void)setMetadata:(SSDownloadMetadata *)metadata;
-- (void)setDownloadMetadata:(SSDownloadMetadata *)metadata;
-- (id)downloadStatus;
-- (NSError *)failureError;
-- (NSString *)downloadIdentifier;
-- (SSDownloadMetadata *)metadata;
-@end
-
-@interface SSDownloadQueue : NSObject
-+ (id)downloadQueueForDownloadKind:(NSString *)kind;
-+ (id)mediaDownloadKinds;
-- (id)initWithDownloadKinds:(id)kinds;
-- (void)addObserver:(id<SSDownloadQueueObserver>)observer;
-- (void)removeObserver:(id<SSDownloadQueueObserver>)observer;
-- (BOOL)addDownload:(SSDownload *)download;
-- (BOOL)cancelDownload:(SSDownload *)download;
-- (NSArray *)downloads;
-- (void)setShouldAutomaticallyFinishDownloads:(BOOL)automaticallyFinish;
++ (id)sharedMusicLibrary:(NSError **)error;
++ (id)newMusicTrackWithPersistentID:(long long)persistentID library:(id)library error:(NSError **)error;
++ (NSString *)musicTrackFilePath:(id)track error:(NSError **)error;
++ (BOOL)setMusicTrack:(id)track value:(id)value forPropertyName:(NSString *)propertyName error:(NSError **)error;
++ (id)musicTrackValue:(id)track forPropertyName:(NSString *)propertyName error:(NSError **)error;
++ (BOOL)updateMusicTrackIntegrity:(id)track error:(NSError **)error;
++ (BOOL)deleteMusicTrack:(id)track error:(NSError **)error;
++ (BOOL)notifyMusicLibrary:(id)library error:(NSError **)error;
++ (BOOL)reloadMediaPlayerLibrary:(NSError **)error;
 @end

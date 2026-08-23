@@ -4,6 +4,7 @@
 #import <substrate.h>
 #import "TPDownloader.h"
 #import "TPImporter.h"
+#import "TPBridge.h"
 
 static char TPProxyKey;
 static void (*TPOriginalShow)(UIActionSheet *, SEL, UIView *);
@@ -54,8 +55,8 @@ static NSDictionary *TPVideoInfo(id source) {
     if (![videoID isKindOfClass:[NSString class]]) videoID = [videoID description];
     if (![title isKindOfClass:[NSString class]]) title = [title description];
     if (![artist isKindOfClass:[NSString class]]) artist = [artist description];
-    if (!videoID.length || !selected) return nil;
-    return @{ @"videoID": videoID, @"title": title ?: @"Untitled", @"artist": artist ?: @"Unknown Artist", @"duration": duration ?: @0, @"url": selected[@"url"], @"audioOnly": @(bestAudio != nil) };
+    if (!TPVideoIDIsValid(videoID) || !selected) return nil;
+    return @{ @"videoID": videoID, @"sourceVideoID": videoID, @"title": title ?: @"Untitled", @"artist": artist ?: @"Unknown Artist", @"duration": duration ?: @0, @"url": selected[@"url"], @"audioOnly": @(bestAudio != nil) };
 }
 
 @interface TPActionProxy : NSObject <UIActionSheetDelegate, UIAlertViewDelegate>
@@ -63,11 +64,12 @@ static NSDictionary *TPVideoInfo(id source) {
 @property(nonatomic, strong) NSDictionary *info;
 @property(nonatomic) NSInteger saveIndex;
 @property(nonatomic, strong) UIAlertView *progressAlert;
+@property(nonatomic, strong) TPDownloadSession *downloadSession;
+@property(nonatomic) BOOL allowDuplicate;
 @end
 
 @implementation TPActionProxy
-- (instancetype)init { if ((self = [super init])) { [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(progress:) name:TPDownloadProgressNotification object:nil]; [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(finished:) name:TPDownloadFinishedNotification object:nil]; } return self; }
-- (void)dealloc { [[NSNotificationCenter defaultCenter] removeObserver:self]; }
+- (instancetype)init { return [super init]; }
 - (void)actionSheet:(UIActionSheet *)sheet clickedButtonAtIndex:(NSInteger)index {
     if (index == _saveIndex) { [self beginSave]; return; }
     if ([_originalDelegate respondsToSelector:_cmd]) [_originalDelegate actionSheet:sheet clickedButtonAtIndex:index];
@@ -79,32 +81,43 @@ static NSDictionary *TPVideoInfo(id source) {
     if ([_originalDelegate respondsToSelector:_cmd]) [_originalDelegate actionSheet:sheet didDismissWithButtonIndex:index];
 }
 - (void)beginSave {
+    self.allowDuplicate = NO;
     NSDictionary *state = [NSDictionary dictionaryWithContentsOfFile:[TPBaseDirectory() stringByAppendingPathComponent:@"state.plist"]];
     if ([state[_info[@"videoID"]][@"status"] isEqualToString:@"imported"]) { UIAlertView *again = [[UIAlertView alloc] initWithTitle:@"Already Saved" message:@"This video was previously imported." delegate:self cancelButtonTitle:@"Cancel" otherButtonTitles:@"Download Again", nil]; again.tag = 100; [again show]; return; }
     [self startDownload];
 }
 - (void)startDownload {
-    TPDownloadRequest *request = [TPDownloadRequest new]; request.videoID = _info[@"videoID"]; request.title = _info[@"title"]; request.artist = _info[@"artist"]; request.duration = [_info[@"duration"] doubleValue]; request.URL = _info[@"url"]; request.audioOnly = [_info[@"audioOnly"] boolValue];
+    TPDownloadRequest *request = [TPDownloadRequest new]; request.videoID = _info[@"videoID"]; request.sourceVideoID = _info[@"sourceVideoID"] ?: _info[@"videoID"]; request.title = _info[@"title"]; request.artist = _info[@"artist"]; request.duration = [_info[@"duration"] doubleValue]; request.URL = _info[@"url"]; request.audioOnly = [_info[@"audioOnly"] boolValue]; request.allowDuplicate = self.allowDuplicate; self.allowDuplicate = NO;
     [TPActiveProxies addObject:self];
     self.progressAlert = [[UIAlertView alloc] initWithTitle:@"Saving Audio" message:@"0%\nKeep YouTube open." delegate:self cancelButtonTitle:@"Cancel" otherButtonTitles:nil]; [_progressAlert show];
     NSError *error = nil;
-    if (![[TPDownloader sharedDownloader] startRequest:request error:&error]) {
+    __weak TPActionProxy *weakSelf = self;
+    self.downloadSession = [[TPDownloader sharedDownloader] startRequest:request progress:^(TPDownloadSession *session, double fraction, NSString *phase) {
+        TPActionProxy *proxy = weakSelf;
+        if (!proxy || proxy.downloadSession != session) return;
+        dispatch_async(dispatch_get_main_queue(), ^{ [proxy downloadProgressForSession:session fraction:fraction phase:phase]; });
+    } completion:^(TPDownloadSession *session, NSError *completionError, NSString *path) {
+        TPActionProxy *proxy = weakSelf;
+        if (!proxy || proxy.downloadSession != session) return;
+        dispatch_async(dispatch_get_main_queue(), ^{ [proxy downloadFinishedForSession:session error:completionError path:path]; });
+    } error:&error];
+    if (!self.downloadSession) {
         [_progressAlert dismissWithClickedButtonIndex:-1 animated:NO]; self.progressAlert = nil; [TPActiveProxies removeObject:self];
         [[[UIAlertView alloc] initWithTitle:@"TubePod" message:error.localizedDescription delegate:nil cancelButtonTitle:@"OK" otherButtonTitles:nil] show];
     }
 }
-- (void)alertView:(UIAlertView *)alert clickedButtonAtIndex:(NSInteger)index { if (alert.tag == 100) { if (index == 1) [self startDownload]; return; } if (alert == _progressAlert && [TPDownloader sharedDownloader].isBusy) [[TPDownloader sharedDownloader] cancel]; }
-- (void)progress:(NSNotification *)note {
-    if ([note.userInfo[@"phase"] isEqualToString:@"importing"]) {
+- (void)alertView:(UIAlertView *)alert clickedButtonAtIndex:(NSInteger)index { if (alert.tag == 100) { if (index == 1) { self.allowDuplicate = YES; [self startDownload]; } return; } if (alert == _progressAlert && self.downloadSession) [[TPDownloader sharedDownloader] cancelSession:self.downloadSession]; }
+- (void)downloadProgressForSession:(TPDownloadSession *)session fraction:(double)fraction phase:(NSString *)phase {
+    if (self.downloadSession != session) return;
+    if ([phase isEqualToString:@"importing"]) {
         [_progressAlert dismissWithClickedButtonIndex:-1 animated:NO];
         self.progressAlert = [[UIAlertView alloc] initWithTitle:@"Adding to Music" message:@"Download complete.\nStay in Music until TubePod says Saved." delegate:self cancelButtonTitle:nil otherButtonTitles:nil];
         [_progressAlert show];
         return;
     }
-    double f = [note.userInfo[@"fraction"] doubleValue];
-    _progressAlert.message = f >= 0 ? [NSString stringWithFormat:@"%.0f%%\nKeep YouTube open.", f * 100.0] : @"Downloading…\nKeep YouTube open.";
+    _progressAlert.message = fraction >= 0 ? [NSString stringWithFormat:@"%.0f%%\nKeep YouTube open.", fraction * 100.0] : @"Downloading…\nKeep YouTube open.";
 }
-- (void)finished:(NSNotification *)note { [_progressAlert dismissWithClickedButtonIndex:-1 animated:YES]; self.progressAlert = nil; NSError *error = note.userInfo[@"error"]; NSString *message = error ? [NSString stringWithFormat:@"%@\nKept at: %@", error.localizedDescription, note.userInfo[@"path"]] : @"The song was added to Music."; [[[UIAlertView alloc] initWithTitle:error ? @"TubePod Error" : @"Saved" message:message delegate:nil cancelButtonTitle:@"OK" otherButtonTitles:nil] show]; [TPActiveProxies removeObject:self]; }
+- (void)downloadFinishedForSession:(TPDownloadSession *)session error:(NSError *)error path:(NSString *)path { if (self.downloadSession != session) return; [_progressAlert dismissWithClickedButtonIndex:-1 animated:YES]; self.progressAlert = nil; NSString *message = error ? [NSString stringWithFormat:@"%@\nKept at: %@", error.localizedDescription, path] : @"The song was added to Music."; [[[UIAlertView alloc] initWithTitle:error ? @"TubePod Error" : @"Saved" message:message delegate:nil cancelButtonTitle:@"OK" otherButtonTitles:nil] show]; self.downloadSession = nil; [TPActiveProxies removeObject:self]; }
 - (BOOL)respondsToSelector:(SEL)sel { return [super respondsToSelector:sel] || [_originalDelegate respondsToSelector:sel]; }
 - (NSMethodSignature *)methodSignatureForSelector:(SEL)sel { return [super methodSignatureForSelector:sel] ?: [_originalDelegate methodSignatureForSelector:sel]; }
 - (void)forwardInvocation:(NSInvocation *)invocation { if ([_originalDelegate respondsToSelector:invocation.selector]) [invocation invokeWithTarget:_originalDelegate]; else [super forwardInvocation:invocation]; }

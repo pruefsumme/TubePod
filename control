@@ -1,6 +1,6 @@
 Package: com.pruefsumme.tubepod
 Name: TubePod
-Version: 0.0.2~beta2
+Version: 0.0.3~beta1
 Architecture: iphoneos-arm
 Description: Save authorized YouTube audio to the native Music library on iOS 6.
 Maintainer: pruefsumme

@@ -4,7 +4,7 @@ TARGET = iphone:clang:6.1:6.0
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = TubePod
-TubePod_FILES = Tweak.xm TPDownloader.m TPImporter.m
+TubePod_FILES = Tweak.xm TPBridge.m TPDatabase.m TPDownloader.m TPImporter.m TPPrivate.m
 TubePod_USE_MODULES = 0
 TubePod_CFLAGS = -fobjc-arc -Werror -Wall -Wextra -Wno-deprecated-declarations -Wno-cast-function-type-mismatch
 TubePod_FRAMEWORKS = UIKit Foundation AVFoundation CoreMedia AudioToolbox

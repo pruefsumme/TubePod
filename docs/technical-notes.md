@@ -44,18 +44,22 @@ The import crosses two processes. YouTube does not have the private entitlement 
 
 The working flow is:
 
-1. YouTube reads the completed M4A and places it with the import request on TubePod's named pasteboard.
+1. YouTube reads the completed M4A, writes it to the owned payload channel, and writes a versioned request with a token to the owned command channel.
 2. YouTube opens the Music app and keeps a background task alive.
-3. The TubePod code loaded inside Music validates the request and exact media length.
-4. The Music process writes the pasteboard data into `/var/mobile/Media/TubePod` and checks it with AVFoundation.
+3. The TubePod code loaded inside Music validates the request, token, protocol version, and exact media length.
+4. The Music process writes the payload into `/var/mobile/Media/TubePod`, checks it with AVFoundation, and clears the payload channel immediately after validation.
 5. Music gives the local `file://` URL and song metadata to Apple's StoreServices classes.
 6. StoreServices copies the file into `/var/mobile/Media/Purchases` and creates the Music library entry.
 7. TubePod repairs the missing audio fields through MusicLibrary.
-8. Music replies through the pasteboard. Only then does YouTube report success.
+8. Music publishes processing, cancellation, success, or error on the separate status channel. Only then does YouTube report success.
+
+Repeated commands for a token are idempotent. YouTube publishes a cancel command when its timeout or background task expires. Music cancels StoreServices and removes only new empty TubePod placeholders until a repaired playable record has been committed; a committed success wins over a late cancel.
+
+Bridge pasteboards are not persistent across a reboot. Music polls the command channel while an import is active, so it can see cancellation without waiting for another app activation. A normal retry uses the Music-side ledger to return an already completed result. Choosing **Download Again** explicitly bypasses that retry shortcut and permits another copy.
 
 Once the file is downloaded, the YouTube alert must change from a percentage to **Adding to Music**. It must not keep showing 0%, and it must not offer Cancel during the Music phase. Music shows its own progress alert and tells the user to stay there until the final Saved or Error message. The Music process also holds a background task so a quick app switch does not immediately suspend the import.
 
-The request contains a random token and the expected media length. Music must reject missing or incomplete data. Clear the large media value from the pasteboard when Music sends its final response.
+The request contains a random token, protocol version, validated video ID, and expected media length. Music must reject missing, stale, incomplete, or oversized data. The converted M4A is limited to 24 MiB and is checked against the filesystem both before and after loading.
 
 StoreServices completion is detected by watching its download queue. A download must first be observed in the queue and then disappear from it. Check `failureError` while polling. A disappearing queue item is not the final success condition. The Music database repair must also succeed.
 
@@ -128,11 +132,12 @@ Old completed tracks with a real file location can usually be repaired. Read the
 
 ## Source layout
 
-- `Tweak.xm` finds video metadata, adds the action-sheet button, and owns the user-facing alerts.
-- `TPDownloader.m` downloads, resumes, validates, converts, and preserves files on failure.
+- `Tweak.xm` is the YouTube integration/UI area: it finds video metadata, adds the action-sheet button, and owns user-facing alerts and session routing.
+- `TPDownloader.m` is the download pipeline: it downloads, resumes, validates, converts, and preserves files on failure.
+- `TPBridge.h/.m` is the shared bridge protocol: typed command/status messages, ownership, validation, serialization, tokens, and size limits.
+- `TPImporter.m` is the Music import pipeline: staging, transaction orchestration, cancellation, repair, cleanup, and the atomic retry ledger.
+- `TPPrivate.h/.m` and `TPDatabase.h/.m` are the private API/database helper area: checked StoreServices, MusicLibrary, MediaPlayer calls, and read-only SQLite queries.
 - The loopback server experiment is deliberately excluded from the repository. Its failure is documented above so it is not accidentally rebuilt.
-- `TPImporter.m` handles the pasteboard bridge, StoreServices queue, track lookup, audio-field repair, and duplicate cleanup.
-- `TPPrivate.h` contains the small private StoreServices interface used by the tweak.
 - `TubePod.plist` limits MobileSubstrate injection to YouTube and Music.
 
 Keep UI work on the main thread. Run network and file transfer work away from it. There must be only one active TubePod download and one active Music import at a time.
@@ -147,7 +152,9 @@ make clean package FINALPACKAGE=1
 
 Check the resulting dylib for `LC_VERSION_MIN_IPHONEOS 6.0` before installing it. Install the rootful package with `dpkg -i`, then restart both YouTube and `Music~iphone`.
 
-Version `0.0.1` was the first beta release and the first build confirmed to complete the full download, handoff, StoreServices import, metadata repair, and playback cycle. It still had a late duplicate-placeholder race. The current test package is `0.0.2~beta2`, which adds delayed placeholder cleanup and refreshes MediaPlayer's current library cache. Alpha9 added the post-import MusicLibrary repair. Alpha10 added clear download/import phases, background time, and placeholder cleanup. Alpha11 added StoreServices queue cancellation and local handoff logging. Alpha12 proved that the live loopback handoff was unreliable. Alpha13 introduced the working named-pasteboard handoff. Alpha8's direct MusicLibrary importer experiment must not be restored.
+Version `0.0.1` was the first beta release and the first build confirmed to complete the full download, handoff, StoreServices import, metadata repair, and playback cycle. `0.0.2~beta2` added delayed placeholder cleanup and refreshed MediaPlayer's current library cache. The prepared hardening package is `0.0.3~beta1`, adding session routing, the owned three-channel bridge, checked runtime signatures, album-constrained queries, the 24 MiB limit, and persistent retry idempotency. Device acceptance still requires the complete regression below. Alpha9 added the post-import MusicLibrary repair. Alpha10 added clear download/import phases, background time, and placeholder cleanup. Alpha11 added StoreServices queue cancellation and local handoff logging. Alpha12 proved that the live loopback handoff was unreliable. Alpha13 introduced the working named-pasteboard handoff. Alpha8's direct MusicLibrary importer experiment must not be restored.
+
+The first `0.0.3~beta1` device regression completed on 2026-08-23. A fresh download of “Revenge” imported as one completed record with a purchase-file location, 44,100 Hz sample rate, 11,665,408 audio samples, and 128 kbps bitrate. The TubePod placeholder count was zero. Playback from the start, seeking, and playing another known-good song afterward all worked.
 
 ## Real-device regression check
 

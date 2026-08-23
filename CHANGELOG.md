@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.0.3-beta1 - 2026-08-23
+
+- Routes download progress and completion through one terminal, session-scoped callback.
+- Validates YouTube IDs, partial files, response lengths, writes, and the 24 MiB bridge limit.
+- Splits command, status, and payload pasteboards with versioned tokens and cancellation acknowledgement.
+- Polls for cancellation throughout the active Music import and does not persist abandoned bridge commands across a reboot.
+- Constrains Music matching and placeholder cleanup to the TubePod album and read-only database results now report failures.
+- Checks private API signatures centrally and records retry outcomes in the Music-side transaction ledger.
+- Keeps the existing **Download Again** choice as an intentional duplicate instead of treating it as an automatic retry.
+
 ## 0.0.2-beta2 - 2026-08-23
 
 - Removes old location-less TubePod placeholders when Music starts.
