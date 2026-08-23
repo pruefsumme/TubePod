@@ -109,6 +109,10 @@ static NSDictionary *TPVideoInfo(id source) {
 - (void)alertView:(UIAlertView *)alert clickedButtonAtIndex:(NSInteger)index { if (alert.tag == 100) { if (index == 1) { self.allowDuplicate = YES; [self startDownload]; } return; } if (alert == _progressAlert && self.downloadSession) [[TPDownloader sharedDownloader] cancelSession:self.downloadSession]; }
 - (void)downloadProgressForSession:(TPDownloadSession *)session fraction:(double)fraction phase:(NSString *)phase {
     if (self.downloadSession != session) return;
+    if ([phase isEqualToString:@"artwork"]) {
+        _progressAlert.message = @"Preparing cover…\nKeep YouTube open.";
+        return;
+    }
     if ([phase isEqualToString:@"importing"]) {
         [_progressAlert dismissWithClickedButtonIndex:-1 animated:NO];
         self.progressAlert = [[UIAlertView alloc] initWithTitle:@"Adding to Music" message:@"Download complete.\nStay in Music until TubePod says Saved." delegate:self cancelButtonTitle:nil otherButtonTitles:nil];

@@ -23,8 +23,10 @@ extern NSString * const TPBridgeStatusKey;
 extern NSString * const TPBridgeMediaLengthKey;
 extern NSString * const TPBridgeMessageKey;
 extern NSString * const TPBridgeAllowDuplicateKey;
+extern NSString * const TPBridgeArtworkDataKey;
 extern const NSUInteger TPBridgeProtocolVersion;
 extern const NSUInteger TPBridgeMaximumMediaBytes;
+extern const NSUInteger TPBridgeMaximumArtworkBytes;
 
 #ifdef __cplusplus
 extern "C" {
@@ -43,7 +45,7 @@ BOOL TPVideoIDIsValid(NSString *videoID);
 + (NSDictionary *)readStatus;
 + (NSData *)readPayload;
 
-+ (NSDictionary *)requestCommandWithToken:(NSString *)token videoID:(NSString *)videoID sourceVideoID:(NSString *)sourceVideoID title:(NSString *)title artist:(NSString *)artist duration:(NSNumber *)duration mediaLength:(NSUInteger)mediaLength allowDuplicate:(BOOL)allowDuplicate error:(NSError **)error;
++ (NSDictionary *)requestCommandWithToken:(NSString *)token videoID:(NSString *)videoID sourceVideoID:(NSString *)sourceVideoID title:(NSString *)title artist:(NSString *)artist duration:(NSNumber *)duration mediaLength:(NSUInteger)mediaLength artworkData:(NSData *)artworkData allowDuplicate:(BOOL)allowDuplicate error:(NSError **)error;
 + (NSDictionary *)cancelCommandWithToken:(NSString *)token videoID:(NSString *)videoID error:(NSError **)error;
 + (NSDictionary *)statusWithKind:(TPBridgeStatusKind)kind token:(NSString *)token message:(NSString *)message;
 

@@ -33,6 +33,9 @@ static NSTimeInterval const TPLedgerRetention = 7.0 * 24.0 * 60.0 * 60.0;
 @property(nonatomic) BOOL cancelRequested;
 @property(nonatomic) BOOL playableResultVerified;
 @property(nonatomic, strong) NSNumber *importedPersistentID;
+@property(nonatomic) BOOL artworkExpected;
+@property(nonatomic) BOOL artworkEmbedded;
+@property(nonatomic) BOOL artworkRegistered;
 @end
 
 static NSError *TPImportError(NSInteger code, NSString *message) {
@@ -156,7 +159,7 @@ static NSDictionary *TPLedgerEntry(NSString *videoID) {
             if (!mediaData.length || !afterAttributes || [mediaData length] != [afterAttributes[NSFileSize] unsignedLongLongValue] || mediaData.length != expectedLength) { [importer finishBridge:NO error:[importer error:28 message:@"TubePod could not read a stable completed M4A. It was kept."]]; return; }
             NSError *bridgeError = nil;
             if (![TPBridge writePayload:mediaData error:&bridgeError]) { [importer finishBridge:NO error:bridgeError]; return; }
-            NSDictionary *request = [TPBridge requestCommandWithToken:token videoID:videoID sourceVideoID:metadata[TPBridgeSourceVideoIDKey] ?: videoID title:metadata[@"title"] artist:metadata[@"artist"] duration:metadata[@"duration"] mediaLength:mediaData.length allowDuplicate:[metadata[TPBridgeAllowDuplicateKey] boolValue] error:&bridgeError];
+            NSDictionary *request = [TPBridge requestCommandWithToken:token videoID:videoID sourceVideoID:metadata[TPBridgeSourceVideoIDKey] ?: videoID title:metadata[@"title"] artist:metadata[@"artist"] duration:metadata[@"duration"] mediaLength:mediaData.length artworkData:metadata[TPBridgeArtworkDataKey] allowDuplicate:[metadata[TPBridgeAllowDuplicateKey] boolValue] error:&bridgeError];
             if (!request || ![TPBridge writeCommand:request error:&bridgeError]) { [TPBridge clearPayload]; [importer finishBridge:NO error:bridgeError ?: [importer error:30 message:@"TubePod could not publish its Music request."]]; return; }
             if (![application openURL:[NSURL URLWithString:@"music:"]]) { [importer publishCancelForToken:token error:NULL]; [importer finishBridge:NO error:[importer error:10 message:@"TubePod could not open Music. The M4A was kept."]]; return; }
             [importer performSelector:@selector(pollBridge) withObject:nil afterDelay:1.0];
@@ -190,6 +193,7 @@ static NSDictionary *TPLedgerEntry(NSString *videoID) {
 - (void)finishBridge:(BOOL)success error:(NSError *)error {
     [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(pollBridge) object:nil];
     if (_backgroundTask != UIBackgroundTaskInvalid) { [[UIApplication sharedApplication] endBackgroundTask:_backgroundTask]; self.backgroundTask = UIBackgroundTaskInvalid; }
+    [TPBridge clearCommand];
     TPImportCompletion block = _completion; self.completion = nil; self.bridgeToken = nil;
     if (block) block(success, error);
 }
@@ -254,12 +258,15 @@ static NSDictionary *TPLedgerEntry(NSString *videoID) {
     self.activeMusicRequest = command;
     self.cancelRequested = NO;
     self.playableResultVerified = NO;
+    self.artworkExpected = [command[TPBridgeArtworkDataKey] length] > 0;
+    self.artworkEmbedded = NO;
+    self.artworkRegistered = NO;
     if (!TPRecordLedger(videoID, token, @"processing", nil, &validationError)) { [self respondToMusicRequest:command kind:TPBridgeStatusKindError error:validationError persistentID:nil]; return; }
     [self writeStatus:TPBridgeStatusKindProcessing token:token message:@"" error:NULL];
     [self performSelector:@selector(pollActiveMusicCommand) withObject:nil afterDelay:0.5];
     self.musicProgressAlert = [[UIAlertView alloc] initWithTitle:@"TubePod" message:@"Adding the song to Music…\nStay in Music until this finishes." delegate:nil cancelButtonTitle:nil otherButtonTitles:nil];
     [self.musicProgressAlert show];
-    NSDictionary *metadata = @{ @"title": command[@"title"] ?: @"Untitled", @"artist": command[@"artist"] ?: @"Unknown Artist", @"album": TPMusicAlbum, @"duration": command[@"duration"] ?: @0, TPBridgeVideoIDKey: videoID };
+    NSDictionary *metadata = @{ @"title": command[@"title"] ?: @"Untitled", @"artist": command[@"artist"] ?: @"Unknown Artist", @"album": TPMusicAlbum, @"duration": command[@"duration"] ?: @0, TPBridgeVideoIDKey: videoID, TPBridgeArtworkDataKey: command[TPBridgeArtworkDataKey] ?: [NSData data] };
     __weak TPImporter *weakSelf = self;
     [self stageAndImportData:mediaData metadata:metadata completion:^(BOOL success, NSError *error) {
         TPImporter *importer = weakSelf;
@@ -282,9 +289,9 @@ static NSDictionary *TPLedgerEntry(NSString *videoID) {
     [TPBridge clearPayload];
     [self writeStatus:kind token:token message:error.localizedDescription ?: (kind == TPBridgeStatusKindSuccess ? @"" : (kind == TPBridgeStatusKindCancelled ? @"Import cancelled." : @"The song could not be imported.")) error:NULL];
     [_musicProgressAlert dismissWithClickedButtonIndex:-1 animated:NO]; self.musicProgressAlert = nil;
-    NSString *message = kind == TPBridgeStatusKindSuccess ? @"The song was added to Music." : (error.localizedDescription ?: (kind == TPBridgeStatusKindCancelled ? @"The import was cancelled." : @"The song could not be imported."));
+    NSString *message = kind == TPBridgeStatusKindSuccess ? (_artworkExpected && !_artworkRegistered ? @"The song was added to Music, but Music could not register its cover." : (_artworkRegistered ? @"The song and cover were added to Music." : @"The song was added to Music.")) : (error.localizedDescription ?: (kind == TPBridgeStatusKindCancelled ? @"The import was cancelled." : @"The song could not be imported."));
     [[[UIAlertView alloc] initWithTitle:kind == TPBridgeStatusKindSuccess ? @"TubePod Saved" : (kind == TPBridgeStatusKindCancelled ? @"TubePod Cancelled" : @"TubePod Error") message:message delegate:nil cancelButtonTitle:@"OK" otherButtonTitles:nil] show];
-    self.activeMusicToken = nil; self.activeMusicRequest = nil; self.cancelRequested = NO; self.playableResultVerified = NO; self.importedPersistentID = nil;
+    self.activeMusicToken = nil; self.activeMusicRequest = nil; self.cancelRequested = NO; self.playableResultVerified = NO; self.importedPersistentID = nil; self.artworkExpected = NO; self.artworkEmbedded = NO; self.artworkRegistered = NO;
 }
 
 - (void)cancelActiveMusicRequest {
@@ -333,8 +340,35 @@ static NSDictionary *TPLedgerEntry(NSString *videoID) {
         dispatch_async(dispatch_get_main_queue(), ^{
             [TPBridge clearPayload];
             if (!playable) { completion(NO, TPImportError(27, [NSString stringWithFormat:@"Music received the file, but AVFoundation found no playable audio. The staging copy was kept at %@.", path])); return; }
-            self.stagedMusicPath = path;
-            completion(YES, nil);
+            NSData *artworkData = metadata[TPBridgeArtworkDataKey];
+            if (!artworkData.length) { self.stagedMusicPath = path; completion(YES, nil); return; }
+            NSString *taggedPath = [[path stringByDeletingPathExtension] stringByAppendingString:@"-artwork.m4a"];
+            [[NSFileManager defaultManager] removeItemAtPath:taggedPath error:NULL];
+            AVAssetExportSession *exporter = [[AVAssetExportSession alloc] initWithAsset:asset presetName:AVAssetExportPresetPassthrough];
+            if (!exporter || ![exporter.supportedFileTypes containsObject:AVFileTypeAppleM4A]) { self.stagedMusicPath = path; completion(YES, nil); return; }
+            AVMutableMetadataItem *artworkItem = [AVMutableMetadataItem metadataItem];
+            artworkItem.keySpace = AVMetadataKeySpaceCommon;
+            artworkItem.key = AVMetadataCommonKeyArtwork;
+            artworkItem.value = artworkData;
+            NSArray *outputMetadata = @[artworkItem];
+            exporter.outputURL = [NSURL fileURLWithPath:taggedPath];
+            exporter.outputFileType = AVFileTypeAppleM4A;
+            exporter.metadata = outputMetadata;
+            [exporter exportAsynchronouslyWithCompletionHandler:^{
+                BOOL exported = exporter.status == AVAssetExportSessionStatusCompleted;
+                NSDictionary *taggedAttributes = exported ? [[NSFileManager defaultManager] attributesOfItemAtPath:taggedPath error:NULL] : nil;
+                AVURLAsset *taggedAsset = taggedAttributes ? [AVURLAsset URLAssetWithURL:[NSURL fileURLWithPath:taggedPath] options:nil] : nil;
+                NSArray *embeddedArtwork = taggedAsset ? [AVMetadataItem metadataItemsFromArray:taggedAsset.commonMetadata withKey:AVMetadataCommonKeyArtwork keySpace:AVMetadataKeySpaceCommon] : nil;
+                BOOL taggedPlayable = taggedAttributes && [taggedAttributes[NSFileSize] unsignedLongLongValue] > 0 && [taggedAsset tracksWithMediaType:AVMediaTypeAudio].count > 0 && embeddedArtwork.count > 0;
+                NSString *selectedPath = path;
+                if (taggedPlayable) { [[NSFileManager defaultManager] removeItemAtPath:path error:NULL]; selectedPath = taggedPath; }
+                else [[NSFileManager defaultManager] removeItemAtPath:taggedPath error:NULL];
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    self.artworkEmbedded = taggedPlayable;
+                    self.stagedMusicPath = selectedPath;
+                    completion(YES, nil);
+                });
+            }];
         });
     });
 }
@@ -410,7 +444,15 @@ static NSDictionary *TPLedgerEntry(NSString *videoID) {
     BOOL bitRateOK = durationOK && [TPPrivateAPI setMusicTrack:track value:@(bitRate) forPropertyName:@"ML3TrackPropertyBitRate" error:&error];
     BOOL integrityOK = bitRateOK && [TPPrivateAPI updateMusicTrackIntegrity:track error:&error];
     if (!sampleOK || !durationOK || !bitRateOK || !integrityOK) { [self finishStoreImport:NO error:error ?: [self error:23 message:@"Music imported the track but rejected its audio metadata repair."]]; return; }
+    if (_artworkEmbedded) {
+        NSArray *artworkItems = [AVMetadataItem metadataItemsFromArray:asset.commonMetadata withKey:AVMetadataCommonKeyArtwork keySpace:AVMetadataKeySpaceCommon];
+        AVMetadataItem *artworkItem = [artworkItems count] ? artworkItems[0] : nil;
+        id artworkValue = artworkItem.value;
+        NSData *artworkData = [artworkValue isKindOfClass:[NSData class]] ? artworkValue : nil;
+        self.artworkRegistered = artworkData.length && [TPPrivateAPI populateMusicTrackArtwork:track data:artworkData error:NULL];
+    }
     if (![TPPrivateAPI notifyMusicLibrary:library error:&error]) { [self finishStoreImport:NO error:error]; return; }
+    if (_artworkRegistered) [TPPrivateAPI reloadMediaPlayerLibrary:NULL];
     self.importedPersistentID = persistentID;
     self.playableResultVerified = YES;
     self.cleanupPolls = 0; self.cleanupQuietPolls = 0;

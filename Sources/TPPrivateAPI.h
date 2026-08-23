@@ -33,6 +33,7 @@
 + (BOOL)setMusicTrack:(id)track value:(id)value forPropertyName:(NSString *)propertyName error:(NSError **)error;
 + (id)musicTrackValue:(id)track forPropertyName:(NSString *)propertyName error:(NSError **)error;
 + (BOOL)updateMusicTrackIntegrity:(id)track error:(NSError **)error;
++ (BOOL)populateMusicTrackArtwork:(id)track data:(NSData *)data error:(NSError **)error;
 + (BOOL)deleteMusicTrack:(id)track error:(NSError **)error;
 + (BOOL)notifyMusicLibrary:(id)library error:(NSError **)error;
 + (BOOL)reloadMediaPlayerLibrary:(NSError **)error;

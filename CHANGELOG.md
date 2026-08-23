@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Downloads the YouTube thumbnail and crops it to a square 600 px cover.
+- Embeds the cover into the M4A without re-encoding its AAC audio.
+- Registers the embedded JPEG in Music's artwork cache after StoreServices creates the track.
+- Keeps importing the original playable M4A if artwork download or embedding is unavailable.
+
 ## 0.0.3-beta1 - 2026-08-23
 
 - Routes download progress and completion through one terminal, session-scoped callback.

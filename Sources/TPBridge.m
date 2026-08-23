@@ -11,8 +11,10 @@ NSString * const TPBridgeStatusKey = @"status";
 NSString * const TPBridgeMediaLengthKey = @"mediaLength";
 NSString * const TPBridgeMessageKey = @"message";
 NSString * const TPBridgeAllowDuplicateKey = @"allowDuplicate";
-const NSUInteger TPBridgeProtocolVersion = 1;
+NSString * const TPBridgeArtworkDataKey = @"artworkData";
+const NSUInteger TPBridgeProtocolVersion = 2;
 const NSUInteger TPBridgeMaximumMediaBytes = 24U * 1024U * 1024U;
+const NSUInteger TPBridgeMaximumArtworkBytes = 512U * 1024U;
 
 static NSString * const TPCommandPasteboardName = @"com.pruefsumme.tubepod.command";
 static NSString * const TPCommandPasteboardType = @"com.pruefsumme.tubepod.command.plist";
@@ -80,12 +82,13 @@ static NSDictionary *TPReadPlist(UIPasteboard *pasteboard, NSString *type) {
 + (NSDictionary *)readStatus { return TPReadPlist([self statusPasteboard], TPStatusPasteboardType); }
 + (NSData *)readPayload { return [[self payloadPasteboard] dataForPasteboardType:TPPayloadPasteboardType]; }
 
-+ (NSDictionary *)requestCommandWithToken:(NSString *)token videoID:(NSString *)videoID sourceVideoID:(NSString *)sourceVideoID title:(NSString *)title artist:(NSString *)artist duration:(NSNumber *)duration mediaLength:(NSUInteger)mediaLength allowDuplicate:(BOOL)allowDuplicate error:(NSError **)error {
++ (NSDictionary *)requestCommandWithToken:(NSString *)token videoID:(NSString *)videoID sourceVideoID:(NSString *)sourceVideoID title:(NSString *)title artist:(NSString *)artist duration:(NSNumber *)duration mediaLength:(NSUInteger)mediaLength artworkData:(NSData *)artworkData allowDuplicate:(BOOL)allowDuplicate error:(NSError **)error {
     NSDictionary *command = @{TPBridgeVersionKey: @(TPBridgeProtocolVersion), TPBridgeCommandKey: @"request",
                                TPBridgeTokenKey: token ?: @"", TPBridgeVideoIDKey: videoID ?: @"",
                                TPBridgeSourceVideoIDKey: sourceVideoID ?: videoID ?: @"",
                                @"title": title ?: @"Untitled", @"artist": artist ?: @"Unknown Artist",
                                @"duration": duration ?: @0, TPBridgeMediaLengthKey: @(mediaLength),
+                               TPBridgeArtworkDataKey: artworkData ?: [NSData data],
                                TPBridgeAllowDuplicateKey: @(allowDuplicate)};
     if (![self validateCommand:command error:error]) return nil;
     return command;
@@ -140,9 +143,11 @@ static NSDictionary *TPReadPlist(UIPasteboard *pasteboard, NSString *type) {
         return NO;
     }
     if ([kind isEqualToString:@"request"]) {
+        NSData *artworkData = command[TPBridgeArtworkDataKey];
         if (!TPVideoIDIsValid(command[TPBridgeVideoIDKey]) || ![command[TPBridgeSourceVideoIDKey] isKindOfClass:[NSString class]] ||
             ![command[@"title"] isKindOfClass:[NSString class]] || ![command[@"artist"] isKindOfClass:[NSString class]] ||
             ![command[@"duration"] isKindOfClass:[NSNumber class]] || ![command[TPBridgeAllowDuplicateKey] isKindOfClass:[NSNumber class]] ||
+            ![artworkData isKindOfClass:[NSData class]] || artworkData.length > TPBridgeMaximumArtworkBytes ||
             [command[TPBridgeMediaLengthKey] unsignedIntegerValue] == 0 ||
             [command[TPBridgeMediaLengthKey] unsignedIntegerValue] > TPBridgeMaximumMediaBytes) {
             if (error) *error = TPBridgeError(8, @"TubePod received a malformed or oversized import request.");

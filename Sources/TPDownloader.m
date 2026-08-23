@@ -2,8 +2,12 @@
 #import "TPBridge.h"
 #import "TPImporter.h"
 #import <AVFoundation/AVFoundation.h>
+#import <UIKit/UIKit.h>
 
 static NSString * const TPErrorDomain = @"com.pruefsumme.tubepod";
+static const NSUInteger TPMaximumRawArtworkBytes = 2U * 1024U * 1024U;
+static const CGFloat TPArtworkDimension = 600.0;
+static const CGFloat TPMinimumArtworkSourceDimension = 300.0;
 
 @interface TPDownloadSession ()
 @property(nonatomic, copy, readwrite) NSString *sessionID;
@@ -237,7 +241,62 @@ static NSString * const TPErrorDomain = @"com.pruefsumme.tubepod";
     }];
 }
 
-- (void)importPath:(NSString *)path {
+- (NSString *)artworkPath {
+    return [[self baseDirectory] stringByAppendingPathComponent:[_request.videoID stringByAppendingString:@".jpg"]];
+}
+
+- (NSData *)squareArtworkDataFromData:(NSData *)sourceData {
+    if (!sourceData.length || sourceData.length > TPMaximumRawArtworkBytes) return nil;
+    UIImage *source = [UIImage imageWithData:sourceData];
+    CGImageRef sourceImage = source.CGImage;
+    if (!sourceImage) return nil;
+    size_t width = CGImageGetWidth(sourceImage), height = CGImageGetHeight(sourceImage);
+    size_t side = MIN(width, height);
+    if (side < (size_t)TPMinimumArtworkSourceDimension) return nil;
+    CGRect cropRect = CGRectMake((CGFloat)(width - side) / 2.0, (CGFloat)(height - side) / 2.0, (CGFloat)side, (CGFloat)side);
+    CGImageRef croppedImage = CGImageCreateWithImageInRect(sourceImage, cropRect);
+    if (!croppedImage) return nil;
+    UIGraphicsBeginImageContextWithOptions(CGSizeMake(TPArtworkDimension, TPArtworkDimension), YES, 1.0);
+    [[UIImage imageWithCGImage:croppedImage] drawInRect:CGRectMake(0, 0, TPArtworkDimension, TPArtworkDimension)];
+    UIImage *squareImage = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    CGImageRelease(croppedImage);
+    if (!squareImage) return nil;
+    NSData *result = nil;
+    for (CGFloat quality = 0.85; quality >= 0.45; quality -= 0.10) {
+        result = UIImageJPEGRepresentation(squareImage, quality);
+        if (result.length && result.length <= TPBridgeMaximumArtworkBytes) break;
+    }
+    return result.length <= TPBridgeMaximumArtworkBytes ? result : nil;
+}
+
+- (NSData *)loadArtworkData {
+    NSString *cachedPath = [self artworkPath];
+    NSData *cached = [NSData dataWithContentsOfFile:cachedPath];
+    if (cached.length && cached.length <= TPBridgeMaximumArtworkBytes && [UIImage imageWithData:cached]) return cached;
+    [[NSFileManager defaultManager] removeItemAtPath:cachedPath error:NULL];
+    NSString *urlString = [NSString stringWithFormat:@"https://i.ytimg.com/vi/%@/maxresdefault.jpg", _request.videoID];
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlString] cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:12.0];
+    [request setValue:@"identity" forHTTPHeaderField:@"Accept-Encoding"];
+    NSURLResponse *response = nil;
+    NSError *requestError = nil;
+    NSData *downloaded = [NSURLConnection sendSynchronousRequest:request returningResponse:&response error:&requestError];
+    NSHTTPURLResponse *http = [response isKindOfClass:[NSHTTPURLResponse class]] ? (NSHTTPURLResponse *)response : nil;
+    BOOL validResponse = !requestError && http.statusCode == 200 && [response.URL.scheme.lowercaseString isEqualToString:@"https"] && downloaded.length <= TPMaximumRawArtworkBytes && [response.MIMEType.lowercaseString hasPrefix:@"image/"];
+    NSData *artwork = validResponse ? [self squareArtworkDataFromData:downloaded] : nil;
+    if (!artwork.length) {
+        urlString = [NSString stringWithFormat:@"https://i.ytimg.com/vi/%@/hqdefault.jpg", _request.videoID];
+        request.URL = [NSURL URLWithString:urlString]; response = nil; requestError = nil;
+        downloaded = [NSURLConnection sendSynchronousRequest:request returningResponse:&response error:&requestError];
+        http = [response isKindOfClass:[NSHTTPURLResponse class]] ? (NSHTTPURLResponse *)response : nil;
+        validResponse = !requestError && http.statusCode == 200 && [response.URL.scheme.lowercaseString isEqualToString:@"https"] && downloaded.length <= TPMaximumRawArtworkBytes && [response.MIMEType.lowercaseString hasPrefix:@"image/"];
+        artwork = validResponse ? [self squareArtworkDataFromData:downloaded] : nil;
+    }
+    if (artwork.length && ![artwork writeToFile:cachedPath options:NSDataWritingAtomic error:NULL]) return nil;
+    return artwork;
+}
+
+- (void)beginImportPath:(NSString *)path artworkData:(NSData *)artworkData {
     if (_terminal || !path.length) return;
     self.retainedPath = path;
     TPDownloadProgressBlock progress = _progressBlock; TPDownloadSession *session = _session;
@@ -248,7 +307,7 @@ static NSString * const TPErrorDomain = @"com.pruefsumme.tubepod";
             if (downloader && !downloader.terminal && downloader.session == session && downloader.progressBlock) downloader.progressBlock(session, 1.0, @"importing");
         });
     }
-    NSDictionary *metadata = @{ @"title": _request.title ?: @"Untitled", @"artist": _request.artist ?: @"Unknown Artist", @"album": @"TubePod", @"duration": @(_request.duration), TPBridgeVideoIDKey: _request.videoID, TPBridgeSourceVideoIDKey: _request.sourceVideoID ?: _request.videoID, TPBridgeAllowDuplicateKey: @(_request.allowDuplicate) };
+    NSDictionary *metadata = @{ @"title": _request.title ?: @"Untitled", @"artist": _request.artist ?: @"Unknown Artist", @"album": @"TubePod", @"duration": @(_request.duration), TPBridgeVideoIDKey: _request.videoID, TPBridgeSourceVideoIDKey: _request.sourceVideoID ?: _request.videoID, TPBridgeArtworkDataKey: artworkData ?: [NSData data], TPBridgeAllowDuplicateKey: @(_request.allowDuplicate) };
     __weak TPDownloader *weakSelf = self;
     [[TPImporter sharedImporter] importM4A:[NSURL fileURLWithPath:path] metadata:metadata completion:^(BOOL success, NSError *error) {
         TPDownloader *downloader = weakSelf;
@@ -256,10 +315,29 @@ static NSString * const TPErrorDomain = @"com.pruefsumme.tubepod";
         if (success) {
             NSError *removeError = nil;
             if (![[NSFileManager defaultManager] removeItemAtPath:path error:&removeError]) { [downloader finishWithError:[downloader error:23 message:[NSString stringWithFormat:@"Music confirmed the import, but TubePod could not remove its retained copy: %@.", removeError.localizedDescription ?: @"file cleanup failed"]]]; return; }
+            [[NSFileManager defaultManager] removeItemAtPath:[downloader artworkPath] error:NULL];
             [downloader writeState:@"imported"];
         }
         [downloader finishWithError:error];
     }];
+}
+
+- (void)importPath:(NSString *)path {
+    if (_terminal || !path.length) return;
+    self.retainedPath = path;
+    TPDownloadSession *session = _session;
+    TPDownloadProgressBlock progress = _progressBlock;
+    if (progress) progress(session, 1.0, @"artwork");
+    __weak TPDownloader *weakSelf = self;
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        TPDownloader *downloader = weakSelf;
+        NSData *artworkData = downloader && !downloader.terminal ? [[downloader loadArtworkData] copy] : nil;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            TPDownloader *currentDownloader = weakSelf;
+            if (!currentDownloader || currentDownloader.terminal || currentDownloader.session != session) return;
+            [currentDownloader beginImportPath:path artworkData:artworkData];
+        });
+    });
 }
 
 - (void)finishWithError:(NSError *)error {

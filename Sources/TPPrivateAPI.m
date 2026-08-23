@@ -150,6 +150,12 @@ static Class TPClass(NSString *name, NSError **error) {
     return ((id(*)(id,SEL,id))objc_msgSend)(track, selector, property);
 }
 + (BOOL)updateMusicTrackIntegrity:(id)track error:(NSError **)error { SEL selector = NSSelectorFromString(@"updateIntegrity"); if (!TPCheck(track, selector, 0, TPPrivateReturnBoolean, error)) return NO; return ((BOOL(*)(id,SEL))objc_msgSend)(track, selector); }
++ (BOOL)populateMusicTrackArtwork:(id)track data:(NSData *)data error:(NSError **)error {
+    if (!data.length) { if (error) *error = TPPrivateError(10, @"Music received empty artwork data."); return NO; }
+    SEL selector = NSSelectorFromString(@"populateArtworkCacheWithArtworkData:");
+    if (!TPCheck(track, selector, 1, TPPrivateReturnBoolean, error)) return NO;
+    return ((BOOL(*)(id,SEL,id))objc_msgSend)(track, selector, data);
+}
 + (BOOL)deleteMusicTrack:(id)track error:(NSError **)error { SEL selector = NSSelectorFromString(@"deleteFromLibrary"); if (!TPCheck(track, selector, 0, TPPrivateReturnBoolean, error)) return NO; return ((BOOL(*)(id,SEL))objc_msgSend)(track, selector); }
 + (BOOL)notifyMusicLibrary:(id)library error:(NSError **)error { SEL selector = NSSelectorFromString(@"notifyContentsDidChange"); if (!TPCheck(library, selector, 0, TPPrivateReturnVoid, error)) return NO; ((void(*)(id,SEL))objc_msgSend)(library, selector); return YES; }
 + (BOOL)reloadMediaPlayerLibrary:(NSError **)error {

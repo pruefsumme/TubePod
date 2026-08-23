@@ -38,19 +38,29 @@ An audio-only MP4 stream can be renamed to `.m4a`. A combined video stream must 
 
 Keep partial files and converted M4A files when an operation fails. Delete the YouTube-side M4A only after Music confirms a complete and repaired import. `state.plist` records download state by video ID.
 
+## Cover artwork
+
+TubePod asks YouTube's image host for `maxresdefault.jpg` after the audio is ready. It falls back to `hqdefault.jpg` when the larger image is missing or too small. The image is center-cropped to a 600 by 600 square and saved as a JPEG no larger than 512 KiB. This matches the square album-cover shape used by Music. The cached JPEG stays beside the retained M4A after a failed import and is removed after a confirmed success.
+
+Artwork is optional. A thumbnail or artwork error must never reject an otherwise playable song. The Music process uses `AVAssetExportPresetPassthrough` to add `AVMetadataCommonKeyArtwork`, then checks that the exported file still has audio and readable artwork metadata. If that check fails, it deletes the tagged attempt and imports the original staged M4A.
+
+Embedded M4A artwork is not enough on iOS 6. StoreServices preserves the `covr` atom but does not populate Music's separate artwork cache. After the completed track is found and its audio fields are repaired, call `ML3Track populateArtworkCacheWithArtworkData:` through the checked private-API facade. Then notify MusicLibrary and reload MediaPlayer's library cache. The Ogdens' Nut Gone Flake device test proved this path: the purchase file kept its 181,552-byte cover and Music created two `artwork_info` formats only after the cache method ran. Do not write `artwork_info` or the artwork files directly.
+
+All tracks still use the album name `TubePod`. This keeps duplicate cleanup and ownership checks safe. Music may show one representative image for the whole TubePod album even though each track has its own embedded cover. Giving every track a separate visible album requires replacing the album-name ownership marker first.
+
 ## Moving the file into Music
 
 The import crosses two processes. YouTube does not have the private entitlement needed to complete a StoreServices music import. The Music app does.
 
 The working flow is:
 
-1. YouTube reads the completed M4A, writes it to the owned payload channel, and writes a versioned request with a token to the owned command channel.
+1. YouTube reads the completed M4A, writes it to the owned payload channel, and writes a versioned request with a token and optional square artwork to the owned command channel.
 2. YouTube opens the Music app and keeps a background task alive.
 3. The TubePod code loaded inside Music validates the request, token, protocol version, and exact media length.
-4. The Music process writes the payload into `/var/mobile/Media/TubePod`, checks it with AVFoundation, and clears the payload channel immediately after validation.
+4. The Music process writes the payload into `/var/mobile/Media/TubePod`, checks it with AVFoundation, optionally adds the artwork with a passthrough export, and clears the payload channel immediately after validation.
 5. Music gives the local `file://` URL and song metadata to Apple's StoreServices classes.
 6. StoreServices copies the file into `/var/mobile/Media/Purchases` and creates the Music library entry.
-7. TubePod repairs the missing audio fields through MusicLibrary.
+7. TubePod repairs the missing audio fields and registers any embedded cover in Music's artwork cache through MusicLibrary.
 8. Music publishes processing, cancellation, success, or error on the separate status channel. Only then does YouTube report success.
 
 Repeated commands for a token are idempotent. YouTube publishes a cancel command when its timeout or background task expires. Music cancels StoreServices and removes only new empty TubePod placeholders until a repaired playable record has been committed; a committed success wins over a late cancel.
@@ -59,7 +69,7 @@ Bridge pasteboards are not persistent across a reboot. Music polls the command c
 
 Once the file is downloaded, the YouTube alert must change from a percentage to **Adding to Music**. It must not keep showing 0%, and it must not offer Cancel during the Music phase. Music shows its own progress alert and tells the user to stay there until the final Saved or Error message. The Music process also holds a background task so a quick app switch does not immediately suspend the import.
 
-The request contains a random token, protocol version, validated video ID, and expected media length. Music must reject missing, stale, incomplete, or oversized data. The converted M4A is limited to 24 MiB and is checked against the filesystem both before and after loading.
+The request contains a random token, protocol version, validated video ID, expected media length, and optional artwork. Music must reject missing, stale, incomplete, or oversized data. The converted M4A is limited to 24 MiB and is checked against the filesystem both before and after loading. Artwork is limited to 512 KiB.
 
 StoreServices completion is detected by watching its download queue. A download must first be observed in the queue and then disappear from it. Check `failureError` while polling. A disappearing queue item is not the final success condition. The Music database repair must also succeed.
 
@@ -166,9 +176,10 @@ A build is not proven by a successful compilation, a StoreServices acceptance re
 4. Confirm that exactly one completed song exists and no empty duplicate remains.
 5. Play from the start and seek into the middle.
 6. Confirm that sound plays and the track does not close immediately.
-7. Play a different known-good song afterward. This catches a malformed entry that poisons Music's playback queue.
-8. Repeat once with an already-downloaded M4A to cover the no-download path.
-9. If a song skips but has one valid database row, test its persistent ID through `MPMusicPlayerController`. Playback there means the remaining bug is the Music app's saved queue.
+7. Confirm that the square cover appears in Now Playing. Check the album view too, but remember that Music may choose one image for the shared TubePod album.
+8. Play a different known-good song afterward. This catches a malformed entry that poisons Music's playback queue.
+9. Repeat once with an already-downloaded M4A to cover the no-download path.
+10. If a song skips but has one valid database row, test its persistent ID through `MPMusicPlayerController`. Playback there means the remaining bug is the Music app's saved queue.
 
 If a test fails, preserve the source M4A. Check whether the record has a real location before changing or deleting anything.
 
