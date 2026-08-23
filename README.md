@@ -26,7 +26,7 @@ Veteris requires AppSync Unified.
 Open a video and tap the white download arrow beside Like, Dislike, and Share. Keep YouTube open while the file downloads, then stay in Music until TubePod says it was saved. **Save Audio** in the Share menu is available as a fallback.
 
 <p align="center">
-  <img src="assets/tubepod-download-button.png" width="320" alt="TubePod download button in YouTube 1.4.0">
+  <img src="assets/tubepod-download-button.png" alt="TubePod download button in YouTube 1.4.0">
 </p>
 
 Only download audio you own or have permission to save.
