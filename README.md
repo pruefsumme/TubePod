@@ -4,7 +4,7 @@
 
 # TubePod
 
-TubePod turns your legacy iOS device into a capable offline music player by adding a quick way to save YouTube audio directly to the Music library.
+TubePod turns your legacy iOS device into a capable offline music player again!
 
 ## What you need
 
