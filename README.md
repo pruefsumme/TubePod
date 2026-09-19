@@ -19,7 +19,7 @@ Veteris requires AppSync Unified.
 
 1. Install YouTube 1.4.0.
 2. Install TubeReplacer.
-3. Add `http://cydia.pruefsumme.xyz` to Cydia and install TubePod.
+3. Add `http://cydia.pruefsumme.xyz` to Cydia and install TubePod (currently under maintenance)
 
 ## How it works
 
